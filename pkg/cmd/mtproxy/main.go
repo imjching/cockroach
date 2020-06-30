@@ -15,6 +15,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 
 	proxy "github.com/cockroachdb/cockroach/pkg/sql/sqlproxy"
 )
@@ -25,6 +26,9 @@ var options struct {
 	cert          string
 	key           string
 	verify        bool
+
+	// HACK(imjching): We should implement routing policies here.
+	substitutionRule string
 }
 
 func main() {
@@ -50,7 +54,17 @@ func run() error {
 		"Address to proxy to (a Postgres-compatible server)")
 	flag.BoolVar(&options.verify, "verify", true,
 		"If true, use InsecureSkipVerify=true for connections to target")
+	flag.StringVar(&options.substitutionRule, "substitution-rule", "",
+		"Substitution rule for the routing table")
 	flag.Parse()
+
+	// TODO(imjching): Implement routing policies. Examples are routing
+	// tables (in which a file of mappings is provided), and substitution
+	// policies (in which a string with a specific format is provided).
+	// Assume that we use a substitution rule for now.
+	if options.substitutionRule == "" {
+		return fmt.Errorf("missing substitution rule")
+	}
 
 	ln, err := net.Listen("tcp", options.listenAddress)
 	if err != nil {
@@ -67,7 +81,7 @@ func run() error {
 	opts := proxy.Options{
 		IncomingTLSConfig: &tls.Config{Certificates: []tls.Certificate{cer}},
 		OutgoingTLSConfig: &tls.Config{InsecureSkipVerify: !options.verify},
-		OutgoingAddrFromParams: func(map[string]string) (addr string, clientErr error) {
+		OutgoingAddrFromParams: func(params map[string]string) (addr string, clientErr error) {
 			// TODO(asubiotto): implement the actual translation here once it is clear
 			// how this will work. It's likely that a filename will be passed to the
 			// proxy which contains a lookup map (and which needs to be re-read on
@@ -80,9 +94,40 @@ func run() error {
 			// prancing-koala.mydb has tenant name "prancing-koala" and data- base
 			// mydb (which will have to be written into the map) and "prancing-koala"
 			// has the same tenant name but an empty database.
-			return options.targetAddress, nil
+			log.Println("params", params)
+
+			tenantName, err := extractTenantName(params)
+			if err != nil {
+				// Cluster name was not embedded at all, whether it is in the
+				// default database name, or PG connection option.
+				return "", fmt.Errorf("invalid cluster name: %v", err)
+			}
+
+			// TODO(imjching): Fix sketchy string replacement approach.
+			// TODO(imjching): Verify that the DNS lookup will be cached locally
+			// in Kubernetes nodes.
+			log.Println("proxying to", strings.ReplaceAll(options.substitutionRule, "{{.tenantName}}", tenantName))
+			return strings.ReplaceAll(options.substitutionRule, "{{.tenantName}}", tenantName), nil
 		},
 	}
 
 	return proxy.Serve(ln, opts)
+}
+
+// extractTenantName extracts the cluster name from the connection parameters.
+// TODO(imjching): Better UX? Embed go code along with routing policies?
+// Using cluster name in the default database name is free tier specific.
+func extractTenantName(params map[string]string) (string, error) {
+	database, ok := params["database"]
+	if !ok {
+		return "", fmt.Errorf("could not find database key")
+	}
+	parts := strings.Split(database, ".")
+	if len(parts) != 2 || parts[0] == "" {
+		log.Println(parts)
+		// This assumes that a regular database name cannot include the dot.
+		return "", fmt.Errorf("malformed database key")
+	}
+	params["database"] = parts[1]
+	return parts[0], nil
 }

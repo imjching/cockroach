@@ -254,6 +254,7 @@ $(info GOPATH set to $(GOPATH))
 # We install our vendored tools to a directory within this repository to avoid
 # overwriting any user-installed binaries of the same name in the default GOBIN.
 GO_INSTALL := GOBIN='$(abspath bin)' GOFLAGS= $(GO) install
+# GO_INSTALL := GOOS=linux GOARCH=amd64 GOFLAGS= $(GO) install
 
 # Prefer tools we've installed with go install and Yarn to those elsewhere on
 # the PATH.
@@ -1663,6 +1664,7 @@ bins = \
   bin/github-pull-request-make \
   bin/gossipsim \
   bin/langgen \
+  bin/mtproxy \
   bin/protoc-gen-gogoroach \
   bin/publish-artifacts \
   bin/publish-provisional-artifacts \

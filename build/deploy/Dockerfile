@@ -11,7 +11,7 @@ RUN apt-get update && \
 	rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /cockroach
-COPY cockroach.sh cockroach /cockroach/
+COPY cockroach.sh cockroach mtproxy /cockroach/
 # Set working directory so that relative paths
 # are resolved appropriately when passed as args.
 WORKDIR /cockroach/
